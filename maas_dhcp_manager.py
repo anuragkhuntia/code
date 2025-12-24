@@ -12,6 +12,14 @@ import requests
 from datetime import datetime
 
 
+# =============================================================================
+# CONFIGURATION - Set your MAAS credentials here
+# =============================================================================
+MAAS_URL = "http://maas.example.com:5240"  # Your MAAS server URL
+MAAS_API_KEY = "YOUR_API_KEY_HERE"         # Your MAAS API key
+# =============================================================================
+
+
 class MAASLeaseManager:
     """Manager for MAAS DHCP leases via API"""
     
@@ -23,16 +31,17 @@ class MAASLeaseManager:
             maas_url: MAAS server URL (e.g., http://maas.example.com:5240)
             api_key: MAAS API key for authentication
         """
-        # Try to get credentials from arguments, then environment, then config file
-        self.maas_url = maas_url or self._get_maas_url()
-        self.api_key = api_key or self._get_api_key()
+        # Priority order: command-line > environment > config file > hardcoded constants
+        self.maas_url = maas_url or self._get_maas_url() or MAAS_URL
+        self.api_key = api_key or self._get_api_key() or MAAS_API_KEY
         
-        if not self.maas_url or not self.api_key:
+        if not self.maas_url or not self.api_key or self.maas_url == "http://maas.example.com:5240":
             print("Warning: MAAS URL or API key not configured")
             print("Configure via:")
-            print("  1. Environment variables: MAAS_URL and MAAS_API_KEY")
-            print("  2. Config file: ~/.maas_config.json")
-            print("  3. Command-line: --maas-url and --api-key")
+            print("  1. Edit MAAS_URL and MAAS_API_KEY constants in the script")
+            print("  2. Environment variables: MAAS_URL and MAAS_API_KEY")
+            print("  3. Config file: ~/.maas_config.json")
+            print("  4. Command-line: --maas-url and --api-key")
     
     def _get_maas_url(self):
         """Get MAAS URL from environment or config file"""
