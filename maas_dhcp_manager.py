@@ -9,7 +9,14 @@ import json
 import csv
 import argparse
 import requests
+import time
+import random
+import string
 from datetime import datetime
+
+# Disable SSL warnings since we use verify=False
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 # =============================================================================
@@ -43,7 +50,7 @@ class MAASLeaseManager:
             print("Edit MAAS_URL and MAAS_API_KEY constants at the top of the script")
     
     def _get_headers(self):
-        """Get headers for MAAS API requests"""
+        """Get headers for MAAS API requests using OAuth PLAINTEXT"""
         # Parse API key in format: consumer_key:token:secret
         parts = self.api_key.split(':')
         if len(parts) != 3:
@@ -53,16 +60,26 @@ class MAASLeaseManager:
         
         consumer_key, token, secret = parts
         
-        # Build OAuth header matching curl format
-        auth_header = (
-            f'OAuth oauth_version="1.0", '
-            f'oauth_signature_method="PLAINTEXT", '
-            f'oauth_consumer_key="{consumer_key}", '
-            f'oauth_token="{token}", '
-            f'oauth_signature="&{secret}"'
-        )
+        # Build OAuth parameters (including timestamp and nonce for MAAS 3.x)
+        oauth_params = {
+            "oauth_consumer_key": consumer_key,
+            "oauth_token": token,
+            "oauth_signature_method": "PLAINTEXT",
+            "oauth_signature": f"&{secret}",
+            "oauth_timestamp": str(int(time.time())),
+            "oauth_nonce": ''.join(random.choices(string.ascii_letters + string.digits, k=32)),
+            "oauth_version": "1.0"
+        }
         
-        print(f"[DEBUG] Building OAuth header with consumer_key: {consumer_key[:10]}...")
+        # Build OAuth header
+        auth_header = "OAuth " + ", ".join(f'{k}="{v}"' for k, v in oauth_params.items())
+        
+        print(f"[DEBUG] OAuth Components:")
+        print(f"[DEBUG]   consumer_key: {consumer_key}")
+        print(f"[DEBUG]   token: {token}")
+        print(f"[DEBUG]   secret: {secret}")
+        print(f"[DEBUG]   timestamp: {oauth_params['oauth_timestamp']}")
+        print(f"[DEBUG]   nonce: {oauth_params['oauth_nonce'][:16]}...")
         
         return {
             'Authorization': auth_header,
@@ -90,12 +107,15 @@ class MAASLeaseManager:
         print(f"[DEBUG] Full URL: {url}")
         print(f"[DEBUG] Headers:")
         for key, value in headers.items():
-            if key == 'Authorization':
-                print(f"[DEBUG]   {key}: {value[:50]}...")
-            else:
-                print(f"[DEBUG]   {key}: {value}")
+            print(f"[DEBUG]   {key}: {value}")
         if data:
             print(f"[DEBUG] Data: {data}")
+        
+        # Generate equivalent curl command
+        curl_cmd = f"curl -k '{url}' \\\n  -H 'Authorization: {headers['Authorization']}' \\\n  -H 'Accept: {headers['Accept']}' \\\n  -X {method}"
+        if data:
+            curl_cmd += f" \\\n  -d '{data}'"
+        print(f"\n[DEBUG] Equivalent curl command:\n{curl_cmd}\n")
         print(f"[DEBUG] ==================================\n")
         
         try:
