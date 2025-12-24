@@ -42,9 +42,6 @@ class MAASLeaseManager:
         self.maas_url = maas_url or MAAS_URL
         self.api_key = api_key or MAAS_API_KEY
         
-        print(f"[DEBUG] Initialized with MAAS URL: {self.maas_url}")
-        print(f"[DEBUG] API Key format: {self.api_key[:20]}..." if self.api_key else "[DEBUG] No API Key")
-        
         if not self.maas_url or not self.api_key or self.maas_url == "http://maas.example.com:5240":
             print("ERROR: MAAS URL or API key not configured")
             print("Edit MAAS_URL and MAAS_API_KEY constants at the top of the script")
@@ -54,8 +51,8 @@ class MAASLeaseManager:
         # Parse API key in format: consumer_key:token:secret
         parts = self.api_key.split(':')
         if len(parts) != 3:
-            print(f"[ERROR] API key must be in format 'consumer_key:token:secret'")
-            print(f"[ERROR] Got {len(parts)} parts instead of 3")
+            print(f"ERROR: API key must be in format 'consumer_key:token:secret'")
+            print(f"ERROR: Got {len(parts)} parts instead of 3")
             return {}
         
         consumer_key, token, secret = parts
@@ -74,13 +71,6 @@ class MAASLeaseManager:
         # Build OAuth header
         auth_header = "OAuth " + ", ".join(f'{k}="{v}"' for k, v in oauth_params.items())
         
-        print(f"[DEBUG] OAuth Components:")
-        print(f"[DEBUG]   consumer_key: {consumer_key}")
-        print(f"[DEBUG]   token: {token}")
-        print(f"[DEBUG]   secret: {secret}")
-        print(f"[DEBUG]   timestamp: {oauth_params['oauth_timestamp']}")
-        print(f"[DEBUG]   nonce: {oauth_params['oauth_nonce'][:16]}...")
-        
         return {
             'Authorization': auth_header,
             'Accept': 'application/json'
@@ -91,7 +81,7 @@ class MAASLeaseManager:
         Make a call to MAAS API
         
         Args:
-            endpoint: API endpoint (e.g., '/MAAS/api/2.0/ipaddresses/')
+            endpoint: API endpoint (e.g., '/MAAS/api/2.0/dhcp-leases/')
             method: HTTP method
             data: Request data for POST/PUT
         """
@@ -102,21 +92,7 @@ class MAASLeaseManager:
         url = f"{self.maas_url.rstrip('/')}{endpoint}"
         headers = self._get_headers()
         
-        print(f"\n[DEBUG] ========== API CALL ==========")
-        print(f"[DEBUG] Method: {method}")
-        print(f"[DEBUG] Full URL: {url}")
-        print(f"[DEBUG] Headers:")
-        for key, value in headers.items():
-            print(f"[DEBUG]   {key}: {value}")
-        if data:
-            print(f"[DEBUG] Data: {data}")
-        
-        # Generate equivalent curl command
-        curl_cmd = f"curl -k '{url}' \\\n  -H 'Authorization: {headers['Authorization']}' \\\n  -H 'Accept: {headers['Accept']}' \\\n  -X {method}"
-        if data:
-            curl_cmd += f" \\\n  -d '{data}'"
-        print(f"\n[DEBUG] Equivalent curl command:\n{curl_cmd}\n")
-        print(f"[DEBUG] ==================================\n")
+        print(f"→ {method} {url}")
         
         try:
             if method == 'GET':
@@ -131,19 +107,15 @@ class MAASLeaseManager:
                 print(f"ERROR: Unsupported HTTP method {method}")
                 return None
             
-            print(f"[DEBUG] Response Status: {response.status_code}")
-            print(f"[DEBUG] Response Headers: {dict(response.headers)}")
-            
             if response.status_code in [200, 201, 202, 204]:
-                print(f"[DEBUG] Success! Response length: {len(response.content)} bytes")
+                print(f"✓ Success ({response.status_code})")
                 return response.json() if response.content else {}
             else:
-                print(f"[ERROR] API Error: {response.status_code}")
-                print(f"[ERROR] Response Text: {response.text}")
+                print(f"✗ Error {response.status_code}: {response.text}")
                 return None
                 
         except requests.exceptions.RequestException as e:
-            print(f"[ERROR] Request Exception: {e}")
+            print(f"✗ Request failed: {e}")
             return None
     
     def list_leases(self, output_format='table'):
@@ -153,25 +125,23 @@ class MAASLeaseManager:
         Args:
             output_format: 'table', 'json', or 'raw'
         """
-        print(f"Fetching leases from MAAS API: {self.maas_url}")
+        print(f"Fetching DHCP leases from MAAS...")
         
-        # Get IP addresses from MAAS
-        result = self._maas_api_call('/MAAS/api/2.0/ipaddresses/')
+        # Get DHCP leases from MAAS
+        result = self._maas_api_call('/MAAS/api/2.0/dhcp-leases/')
         
         if result is None:
             return []
         
         leases = []
         for item in result:
-            if item.get('alloc_type') in [1, 4, 5]:  # AUTO, DHCP, DISCOVERED
-                lease = {
-                    'ip_address': item.get('ip', 'N/A'),
-                    'mac_address': item.get('mac_address', 'N/A'),
-                    'hostname': item.get('hostname', 'N/A'),
-                    'alloc_type': item.get('alloc_type_name', 'N/A'),
-                    'resource': item.get('resource_uri', '')
-                }
-                leases.append(lease)
+            lease = {
+                'ip_address': item.get('ip', 'N/A'),
+                'mac_address': item.get('mac', 'N/A'),
+                'hostname': item.get('hostname', 'N/A'),
+                'lease_time': item.get('lease_time_seconds', 'N/A')
+            }
+            leases.append(lease)
         
         if output_format == 'json':
             print(json.dumps(leases, indent=2))
@@ -211,28 +181,28 @@ class MAASLeaseManager:
             identifier_type: 'ip' or 'mac'
         """
         # First, find the lease
-        result = self._maas_api_call('/MAAS/api/2.0/ipaddresses/')
+        result = self._maas_api_call('/MAAS/api/2.0/dhcp-leases/')
         
         if result is None:
             return False
         
-        resource_uri = None
+        lease_id = None
         for item in result:
             if identifier_type == 'ip' and item.get('ip') == identifier:
-                resource_uri = item.get('resource_uri')
+                lease_id = item.get('id')
                 break
-            elif identifier_type == 'mac' and item.get('mac_address', '').lower() == identifier.lower():
-                resource_uri = item.get('resource_uri')
+            elif identifier_type == 'mac' and item.get('mac', '').lower() == identifier.lower():
+                lease_id = item.get('id')
                 break
         
-        if not resource_uri:
+        if not lease_id:
             print(f"Lease not found for {identifier}")
             return False
         
-        # Release the IP
-        release_result = self._maas_api_call(f"{resource_uri}?op=release", method='POST')
+        # Delete the lease
+        delete_result = self._maas_api_call(f'/MAAS/api/2.0/dhcp-leases/{lease_id}/', method='DELETE')
         
-        if release_result is not None:
+        if delete_result is not None:
             print(f"Successfully deleted lease for {identifier}")
             return True
         return False
@@ -250,14 +220,14 @@ class MAASLeaseManager:
             print("Error: Must provide both ip and mac")
             return False
         
-        # Reserve IP address in MAAS
+        # Create DHCP lease in MAAS
         data = {
             'ip': ip,
             'mac': mac,
             'hostname': hostname or ''
         }
         
-        result = self._maas_api_call('/MAAS/api/2.0/ipaddresses/?op=reserve', method='POST', data=data)
+        result = self._maas_api_call('/MAAS/api/2.0/dhcp-leases/', method='POST', data=data)
         
         if result:
             print(f"Successfully added lease for {ip} ({mac})")
@@ -288,8 +258,6 @@ class MAASLeaseManager:
                 
                 success_count = 0
                 fail_count = 0
-                
-                print("Starting bulk append operation...")
                 
                 for row_num, row in enumerate(reader, start=2):  # start=2 because row 1 is header
                     ip = row.get('ip', '').strip()
