@@ -1,0 +1,1 @@
+{"server1": {"hostname": "compute01", "ram": 128, "vcpu": 256, "disk": 500}, "server2": {"hostname": "compute01", "ram": 128, "vcpu": 256, "disk": 500}, "server3": {"hostname": "compute03", "ram": 128, "vcpu": 256, "disk": 500}}
