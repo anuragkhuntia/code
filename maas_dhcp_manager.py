@@ -103,7 +103,7 @@ class MAASLeaseManager:
         Make a call to MAAS API
         
         Args:
-            endpoint: API endpoint (e.g., '/api/2.0/ipaddresses/')
+            endpoint: API endpoint (e.g., '/MAAS/api/2.0/ipaddresses/')
             method: HTTP method
             data: Request data for POST/PUT
         """
@@ -147,7 +147,7 @@ class MAASLeaseManager:
         print(f"Fetching leases from MAAS API: {self.maas_url}")
         
         # Get IP addresses from MAAS
-        result = self._maas_api_call('/api/2.0/ipaddresses/')
+        result = self._maas_api_call('/MAAS/api/2.0/ipaddresses/')
         
         if result is None:
             return []
@@ -202,7 +202,7 @@ class MAASLeaseManager:
             identifier_type: 'ip' or 'mac'
         """
         # First, find the lease
-        result = self._maas_api_call('/api/2.0/ipaddresses/')
+        result = self._maas_api_call('/MAAS/api/2.0/ipaddresses/')
         
         if result is None:
             return False
@@ -248,7 +248,7 @@ class MAASLeaseManager:
             'hostname': hostname or ''
         }
         
-        result = self._maas_api_call('/api/2.0/ipaddresses/?op=reserve', method='POST', data=data)
+        result = self._maas_api_call('/MAAS/api/2.0/ipaddresses/?op=reserve', method='POST', data=data)
         
         if result:
             print(f"Successfully added lease for {ip} ({mac})")
