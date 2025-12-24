@@ -31,72 +31,42 @@ class MAASLeaseManager:
             maas_url: MAAS server URL (e.g., http://maas.example.com:5240)
             api_key: MAAS API key for authentication
         """
-        # Priority order: command-line > environment > config file > hardcoded constants
-        self.maas_url = maas_url or self._get_maas_url() or MAAS_URL
-        self.api_key = api_key or self._get_api_key() or MAAS_API_KEY
+        # Use command-line args or hardcoded constants
+        self.maas_url = maas_url or MAAS_URL
+        self.api_key = api_key or MAAS_API_KEY
+        
+        print(f"[DEBUG] Initialized with MAAS URL: {self.maas_url}")
+        print(f"[DEBUG] API Key format: {self.api_key[:20]}..." if self.api_key else "[DEBUG] No API Key")
         
         if not self.maas_url or not self.api_key or self.maas_url == "http://maas.example.com:5240":
-            print("Warning: MAAS URL or API key not configured")
-            print("Configure via:")
-            print("  1. Edit MAAS_URL and MAAS_API_KEY constants in the script")
-            print("  2. Environment variables: MAAS_URL and MAAS_API_KEY")
-            print("  3. Config file: ~/.maas_config.json")
-            print("  4. Command-line: --maas-url and --api-key")
-    
-    def _get_maas_url(self):
-        """Get MAAS URL from environment or config file"""
-        # Try environment variable first
-        url = os.environ.get('MAAS_URL')
-        if url:
-            return url
-        
-        # Try config file
-        config = self._load_config()
-        return config.get('maas_url')
-    
-    def _get_api_key(self):
-        """Get API key from environment or config file"""
-        # Try environment variable first
-        key = os.environ.get('MAAS_API_KEY')
-        if key:
-            return key
-        
-        # Try config file
-        config = self._load_config()
-        return config.get('api_key')
-    
-    def _load_config(self):
-        """Load configuration from ~/.maas_config.json"""
-        config_path = os.path.expanduser('~/.maas_config.json')
-        if os.path.exists(config_path):
-            try:
-                with open(config_path, 'r') as f:
-                    return json.load(f)
-            except Exception as e:
-                print(f"Warning: Could not load config file: {e}")
-        return {}
-    
-    def save_config(self, maas_url, api_key):
-        """Save configuration to ~/.maas_config.json"""
-        config_path = os.path.expanduser('~/.maas_config.json')
-        try:
-            with open(config_path, 'w') as f:
-                json.dump({
-                    'maas_url': maas_url,
-                    'api_key': api_key
-                }, f, indent=2)
-            print(f"Configuration saved to {config_path}")
-            return True
-        except Exception as e:
-            print(f"Error saving config: {e}")
-            return False
+            print("ERROR: MAAS URL or API key not configured")
+            print("Edit MAAS_URL and MAAS_API_KEY constants at the top of the script")
     
     def _get_headers(self):
         """Get headers for MAAS API requests"""
+        # Parse API key in format: consumer_key:token:secret
+        parts = self.api_key.split(':')
+        if len(parts) != 3:
+            print(f"[ERROR] API key must be in format 'consumer_key:token:secret'")
+            print(f"[ERROR] Got {len(parts)} parts instead of 3")
+            return {}
+        
+        consumer_key, token, secret = parts
+        
+        # Build OAuth header matching curl format
+        auth_header = (
+            f'OAuth oauth_version="1.0", '
+            f'oauth_signature_method="PLAINTEXT", '
+            f'oauth_consumer_key="{consumer_key}", '
+            f'oauth_token="{token}", '
+            f'oauth_signature="&{secret}"'
+        )
+        
+        print(f"[DEBUG] Building OAuth header with consumer_key: {consumer_key[:10]}...")
+        
         return {
-            'Authorization': f'OAuth oauth_version="1.0", oauth_signature_method="PLAINTEXT", oauth_consumer_key="{self.api_key.split(":")[0]}", oauth_token="{self.api_key.split(":")[1]}", oauth_signature="&{self.api_key.split(":")[2]}"',
-            'Accept': 'application/json',
-            'Content-Type': 'application/x-www-form-urlencoded'
+            'Authorization': auth_header,
+            'Accept': 'application/json'
         }
     
     def _maas_api_call(self, endpoint, method='GET', data=None):
@@ -109,11 +79,24 @@ class MAASLeaseManager:
             data: Request data for POST/PUT
         """
         if not self.maas_url or not self.api_key:
-            print("Error: MAAS API credentials not provided")
+            print("ERROR: MAAS API credentials not provided")
             return None
         
         url = f"{self.maas_url.rstrip('/')}{endpoint}"
         headers = self._get_headers()
+        
+        print(f"\n[DEBUG] ========== API CALL ==========")
+        print(f"[DEBUG] Method: {method}")
+        print(f"[DEBUG] Full URL: {url}")
+        print(f"[DEBUG] Headers:")
+        for key, value in headers.items():
+            if key == 'Authorization':
+                print(f"[DEBUG]   {key}: {value[:50]}...")
+            else:
+                print(f"[DEBUG]   {key}: {value}")
+        if data:
+            print(f"[DEBUG] Data: {data}")
+        print(f"[DEBUG] ==================================\n")
         
         try:
             if method == 'GET':
@@ -125,17 +108,22 @@ class MAASLeaseManager:
             elif method == 'DELETE':
                 response = requests.delete(url, headers=headers, verify=False)
             else:
-                print(f"Error: Unsupported HTTP method {method}")
+                print(f"ERROR: Unsupported HTTP method {method}")
                 return None
             
+            print(f"[DEBUG] Response Status: {response.status_code}")
+            print(f"[DEBUG] Response Headers: {dict(response.headers)}")
+            
             if response.status_code in [200, 201, 202, 204]:
+                print(f"[DEBUG] Success! Response length: {len(response.content)} bytes")
                 return response.json() if response.content else {}
             else:
-                print(f"API Error: {response.status_code} - {response.text}")
+                print(f"[ERROR] API Error: {response.status_code}")
+                print(f"[ERROR] Response Text: {response.text}")
                 return None
                 
         except requests.exceptions.RequestException as e:
-            print(f"Error calling MAAS API: {e}")
+            print(f"[ERROR] Request Exception: {e}")
             return None
     
     def list_leases(self, output_format='table'):
@@ -319,17 +307,12 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Configuration:
-  Set MAAS credentials via (in order of priority):
-    1. Command-line: --maas-url and --api-key
-    2. Environment: export MAAS_URL=http://... and export MAAS_API_KEY=...
-    3. Config file: ~/.maas_config.json with {"maas_url": "...", "api_key": "..."}
+  Edit MAAS_URL and MAAS_API_KEY constants at the top of the script.
+  API Key format must be: consumer_key:token:secret (three parts separated by colons)
   
-  Or use 'configure' action to save credentials to config file.
+  Optionally override with command-line: --maas-url and --api-key
 
 Examples:
-  # Configure credentials (saves to ~/.maas_config.json)
-  python maas_dhcp_manager.py configure --maas-url http://maas.example.com:5240 --api-key YOUR_API_KEY
-  
   # List all leases
   python maas_dhcp_manager.py list
   
@@ -354,7 +337,7 @@ Examples:
     )
     
     parser.add_argument('action', 
-                       choices=['list', 'delete', 'append', 'configure'],
+                       choices=['list', 'delete', 'append'],
                        help='Action to perform')
     
     parser.add_argument('--maas-url', 
@@ -381,15 +364,6 @@ Examples:
                        help='CSV file with lease data (columns: lease_name, ip, mac, hostname)')
     
     args = parser.parse_args()
-    
-    # Handle configure action separately
-    if args.action == 'configure':
-        if not args.maas_url or not args.api_key:
-            print("Error: Both --maas-url and --api-key are required for configure action")
-            return
-        manager = MAASLeaseManager()
-        manager.save_config(args.maas_url, args.api_key)
-        return
     
     manager = MAASLeaseManager(
         maas_url=args.maas_url,
