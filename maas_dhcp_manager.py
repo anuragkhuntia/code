@@ -81,7 +81,7 @@ class MAASLeaseManager:
         Make a call to MAAS API
         
         Args:
-            endpoint: API endpoint (e.g., '/MAAS/api/2.0/dhcp-leases/')
+            endpoint: API endpoint (e.g., '/MAAS/api/2.0/dhcp-snippets/')
             method: HTTP method
             data: Request data for POST/PUT
         """
@@ -128,7 +128,7 @@ class MAASLeaseManager:
         print(f"Fetching DHCP leases from MAAS...")
         
         # Get DHCP leases from MAAS
-        result = self._maas_api_call('/MAAS/api/2.0/dhcp-leases/')
+        result = self._maas_api_call('/MAAS/api/2.0/dhcp-snippets/')
         
         if result is None:
             return []
@@ -192,7 +192,7 @@ class MAASLeaseManager:
             identifier_type: 'ip' or 'mac'
         """
         # First, find the lease
-        result = self._maas_api_call('/MAAS/api/2.0/dhcp-leases/')
+        result = self._maas_api_call('/MAAS/api/2.0/dhcp-snippets/')
         
         if result is None:
             return False
@@ -211,7 +211,7 @@ class MAASLeaseManager:
             return False
         
         # Delete the lease
-        delete_result = self._maas_api_call(f'/MAAS/api/2.0/dhcp-leases/{lease_id}/', method='DELETE')
+        delete_result = self._maas_api_call(f'/MAAS/api/2.0/dhcp-snippets/{lease_id}/', method='DELETE')
         
         if delete_result is not None:
             print(f"Successfully deleted lease for {identifier}")
@@ -239,55 +239,45 @@ class MAASLeaseManager:
             'lease_name': hostname or ''  # Use hostname as lease_name if not provided separately
         }
         
-        result = self._maas_api_call('/MAAS/api/2.0/dhcp-leases/', method='POST', data=data)
+        result = self._maas_api_call('/MAAS/api/2.0/dhcp-snippets/', method='POST', data=data)
         
         if result:
             print(f"Successfully added lease for {ip} ({mac})")
             return True
         return False
     
-    def update_lease(self, identifier, updates, identifier_type='ip'):
+    def update_lease(self, snippet_name, ip, mac, hostname):
         """
-        Update a lease entry via MAAS API
+        Update a DHCP snippet by appending lease configuration
         
         Args:
-            identifier: IP or MAC address to identify the lease
-            updates: Dictionary of fields to update (hostname, etc.)
-            identifier_type: 'ip' or 'mac'
+            snippet_name: Name of the DHCP snippet to update
+            ip: IP address for the lease
+            mac: MAC address for the lease
+            hostname: Hostname for the lease
         """
-        # First, find the lease
-        result = self._maas_api_call('/MAAS/api/2.0/dhcp-leases/')
+        # Construct the lease string
+        lease_string = f"host {hostname} {{ hardware ethernet {mac}; fixed-address {ip}; }}"
         
-        if result is None:
-            return False
+        # Update the snippet - append the lease string to the snippet's value
+        data = {
+            'name': snippet_name,
+            'value': lease_string
+        }
         
-        lease_id = None
-        for item in result:
-            if identifier_type == 'ip' and item.get('ip') == identifier:
-                lease_id = item.get('id')
-                break
-            elif identifier_type == 'mac' and item.get('mac', '').lower() == identifier.lower():
-                lease_id = item.get('id')
-                break
-        
-        if not lease_id:
-            print(f"Lease not found for {identifier}")
-            return False
-        
-        # Update the lease
-        update_result = self._maas_api_call(f'/MAAS/api/2.0/dhcp-leases/{lease_id}/', method='PUT', data=updates)
+        update_result = self._maas_api_call(f'/MAAS/api/2.0/dhcp-snippets/{snippet_name}/', method='PUT', data=data)
         
         if update_result is not None:
-            print(f"Successfully updated lease for {identifier}")
+            print(f"Successfully updated snippet '{snippet_name}' with lease for {hostname} ({ip})")
             return True
         return False
     
     def update_from_csv(self, csv_file):
         """
-        Update multiple leases from a CSV file
+        Update DHCP snippets from a CSV file
         
         Args:
-            csv_file: Path to CSV file with columns: ip (or mac), hostname, and other fields to update
+            csv_file: Path to CSV file with columns: lease_name, ip, mac, hostname
         """
         if not os.path.exists(csv_file):
             print(f"Error: CSV file not found: {csv_file}")
@@ -297,55 +287,39 @@ class MAASLeaseManager:
             with open(csv_file, 'r') as f:
                 reader = csv.DictReader(f)
                 
-                # Check if we have identifier columns
-                has_ip = 'ip' in reader.fieldnames
-                has_mac = 'mac' in reader.fieldnames
-                
-                if not has_ip and not has_mac:
-                    print("Error: CSV must contain either 'ip' or 'mac' column to identify leases")
+                # Check required columns
+                required = ['lease_name', 'ip', 'mac']
+                if not all(col in reader.fieldnames for col in required):
+                    print(f"Error: CSV must contain columns: {', '.join(required)}")
+                    print(f"Found columns: {', '.join(reader.fieldnames)}")
                     return False
                 
                 success_count = 0
                 fail_count = 0
                 
                 for row_num, row in enumerate(reader, start=2):
+                    lease_name = row.get('lease_name', '').strip()
                     ip = row.get('ip', '').strip()
                     mac = row.get('mac', '').strip()
                     hostname = row.get('hostname', '').strip()
-                    lease_name = row.get('lease_name', '').strip()
                     
-                    # Determine identifier
-                    if ip:
-                        identifier = ip
-                        identifier_type = 'ip'
-                    elif mac:
-                        identifier = mac
-                        identifier_type = 'mac'
-                    else:
-                        print(f"Row {row_num}: Skipping - no ip or mac provided")
+                    if not lease_name or not ip or not mac:
+                        print(f"Row {row_num}: Skipping - missing lease_name, ip, or mac")
                         fail_count += 1
                         continue
                     
-                    # Prepare updates
-                    updates = {}
-                    if hostname:
-                        updates['hostname'] = hostname
-                    elif lease_name:
-                        updates['hostname'] = lease_name
+                    # Use lease_name as hostname if hostname not provided
+                    if not hostname:
+                        hostname = lease_name
                     
-                    if not updates:
-                        print(f"Row {row_num}: Skipping - no fields to update")
-                        fail_count += 1
-                        continue
+                    print(f"Row {row_num}: Updating snippet '{lease_name}' with {hostname} ({ip})")
                     
-                    print(f"Row {row_num}: Updating lease {identifier}")
-                    
-                    if self.update_lease(identifier, updates, identifier_type):
+                    if self.update_lease(lease_name, ip, mac, hostname):
                         success_count += 1
                     else:
                         fail_count += 1
                 
-                print(f"\nCompleted: {success_count} leases updated, {fail_count} failed")
+                print(f"\nCompleted: {success_count} snippets updated, {fail_count} failed")
                 return success_count > 0
                 
         except Exception as e:
@@ -435,10 +409,7 @@ Examples:
   # Delete lease by MAC address
   python maas_dhcp_manager.py delete --mac 00:11:22:33:44:55
   
-  # Update hostname for a lease
-  python maas_dhcp_manager.py update --ip 192.168.1.100 --hostname newhost
-  
-  # Update multiple leases from CSV file
+  # Update DHCP snippet from CSV file (lease_name is snippet name)
   python maas_dhcp_manager.py update --file leases.csv
   
   # Append a new lease entry with IP, MAC, and hostname
@@ -501,20 +472,8 @@ Examples:
         if args.file:
             manager.update_from_csv(args.file)
         else:
-            updates = {}
-            if args.hostname:
-                updates['hostname'] = args.hostname
-            
-            if not updates:
-                print("Error: Must specify at least one field to update (--hostname) or use --file")
-                return
-            
-            if args.ip:
-                manager.update_lease(args.ip, updates, identifier_type='ip')
-            elif args.mac:
-                manager.update_lease(args.mac, updates, identifier_type='mac')
-            else:
-                print("Error: Must specify --ip or --mac to identify the lease, or use --file")
+            print("Error: Update action requires --file with CSV")
+            print("CSV format: lease_name, ip, mac, hostname")
     
     elif args.action == 'append':
         if args.file:
