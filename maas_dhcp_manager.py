@@ -94,8 +94,9 @@ class MAASLeaseManager:
     def _get_headers(self):
         """Get headers for MAAS API requests"""
         return {
-            'Authorization': f'OAuth oauth_token={self.api_key}',
-            'Accept': 'application/json'
+            'Authorization': f'OAuth oauth_version="1.0", oauth_signature_method="PLAINTEXT", oauth_consumer_key="{self.api_key.split(":")[0]}", oauth_token="{self.api_key.split(":")[1]}", oauth_signature="&{self.api_key.split(":")[2]}"',
+            'Accept': 'application/json',
+            'Content-Type': 'application/x-www-form-urlencoded'
         }
     
     def _maas_api_call(self, endpoint, method='GET', data=None):
